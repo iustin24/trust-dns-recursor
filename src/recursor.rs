@@ -440,7 +440,7 @@ impl Recursor {
         let ns = RecursorPool::from(zone.clone(), ns);
 
         // store in cache for future usage
-        println!("found nameservers for {}", zone);
+        println!("found nameservers for {} {}", zone, ns);
         self.name_server_cache.lock().insert(zone, ns.clone());
         Ok(ns)
     }
