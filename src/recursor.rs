@@ -267,7 +267,7 @@ impl Recursor {
         }
 
         let ns = ns.ok_or_else(|| Error::from(format!("no nameserver found for {}", zone)))?;
-        debug!("found zone {} for {}", ns.zone(), query);
+        println!("found zone {} for {}", ns.zone(), query);
 
         let response = self.lookup(query, ns, request_time).await?;
         Ok(response)
@@ -323,7 +323,7 @@ impl Recursor {
         let parent_zone = zone.base_name();
 
         let nameserver_pool = if parent_zone.is_root() {
-            debug!("using roots for {} nameservers", zone);
+            println!("using roots for {} nameservers", zone);
             self.roots.clone()
         } else {
             self.ns_pool_for_zone(parent_zone, request_time).await?
@@ -440,7 +440,7 @@ impl Recursor {
         let ns = RecursorPool::from(zone.clone(), ns);
 
         // store in cache for future usage
-        debug!("found nameservers for {}", zone);
+        println!("found nameservers for {}", zone);
         self.name_server_cache.lock().insert(zone, ns.clone());
         Ok(ns)
     }
