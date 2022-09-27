@@ -227,6 +227,48 @@ impl Recursor {
     /// has contiguous zones at the root and MIL domains, but also has a non-
     /// contiguous zone at ISI.EDU.
     /// ```
+    ///
+    pub async fn get_auth(&self, query: Query, request_time: Instant) -> Result<(String, Vec<String>), Error> {
+        // not in cache, let's look for an ns record for lookup
+        let zone = match query.query_type() {
+            RecordType::NS => query.name().base_name(),
+            // look for the NS records "inside" the zone
+            _ => query.name().clone(),
+        };
+
+        let mut zone = zone;
+        let mut ns = None;
+        let mut ns_vec: Vec<String> = vec![];
+        let mut last = String::from("");
+        // max number of forwarding processes
+        'max_forward: for _ in 0..20 {
+            match self.ns_pool_for_zone(zone.clone(), request_time).await {
+                Ok((found, (last_x, vec), )) => {
+                    // found the nameserver
+
+                    ns_vec = vec;
+                    last = last_x;
+                    ns = Some(found);
+                    break 'max_forward;
+                }
+                Err(e) => match e.kind() {
+                    ErrorKind::Forward(name) => {
+                        // if we already had this name, don't try again
+                        if &zone == name {
+                            debug!("zone previously searched for {}", name);
+                            break 'max_forward;
+                        };
+
+                        debug!("ns forwarded to {}", name);
+                        zone = name.clone();
+                    }
+                    _ => return Err(e),
+                },
+            }
+        }
+        Ok((last, ns_vec))
+    }
+
     pub async fn resolve(&self, query: Query, request_time: Instant) -> Result<Lookup, Error> {
         if let Some(lookup) = self.record_cache.get(&query, request_time) {
             return lookup.map_err(Into::into);
@@ -245,8 +287,10 @@ impl Recursor {
         // max number of forwarding processes
         'max_forward: for _ in 0..20 {
             match self.ns_pool_for_zone(zone.clone(), request_time).await {
-                Ok(found) => {
+                Ok((found, vec)) => {
                     // found the nameserver
+
+                    //println!("{:?}", vec);
                     ns = Some(found);
                     break 'max_forward;
                 }
@@ -267,7 +311,7 @@ impl Recursor {
         }
 
         let ns = ns.ok_or_else(|| Error::from(format!("no nameserver found for {}", zone)))?;
-        println!("found zone {} for {}", ns.zone(), query);
+        //println!("found zone {} for {}", ns.zone(), query);
 
         let response = self.lookup(query, ns, request_time).await?;
         Ok(response)
@@ -314,19 +358,19 @@ impl Recursor {
         &self,
         zone: Name,
         request_time: Instant,
-    ) -> Result<RecursorPool<TokioConnection, TokioConnectionProvider>, Error> {
+    ) -> Result<(RecursorPool<TokioConnection, TokioConnectionProvider>,(String, Vec<String>)), Error> {
         // TODO: need to check TTLs here.
         if let Some(ns) = self.name_server_cache.lock().get_mut(&zone) {
-            return Ok(ns.clone());
+            return Ok((ns.clone(), (String::from(""), vec![])));
         };
 
         let parent_zone = zone.base_name();
 
         let nameserver_pool = if parent_zone.is_root() {
-            println!("using roots for {} nameservers", zone);
+            debug!("using roots for {} nameservers", zone);
             self.roots.clone()
         } else {
-            self.ns_pool_for_zone(parent_zone, request_time).await?
+            self.ns_pool_for_zone(parent_zone, request_time).await?.0
         };
 
         // TODO: check for cached ns pool for this zone
@@ -343,7 +387,8 @@ impl Recursor {
         // get all the NS records and glue
         let mut config_group = NameServerConfigGroup::new();
         let mut need_ips_for_names = Vec::new();
-
+        let mut iustin: Vec<String> = vec![];
+        let mut last = String::from("");
         // unpack all glued records
         for zns in response.record_iter() {
             if let Some(ns_data) = zns.data().and_then(RData::as_ns) {
@@ -352,7 +397,10 @@ impl Recursor {
                 //     .filter(|g| g.name() == ns_data)
                 //     .filter_map(Record::data)
                 //     .filter_map(RData::to_ip_addr);
-
+                //println!("{:?}", ns_data);
+                last = response.query().name().to_string();
+                //println!("{:?}", response);
+                iustin.push(ns_data.to_string());
                 let cached_a = self
                     .record_cache
                     .get(&Query::query(ns_data.clone(), RecordType::A), request_time);
@@ -431,18 +479,19 @@ impl Recursor {
             }
         }
 
+
         // now construct a namesever pool based off the NS and glue records
         let ns = NameServerPool::from_config(
             config_group,
             &recursor_opts(),
             TokioConnectionProvider::new(TokioHandle),
         );
+
         let ns = RecursorPool::from(zone.clone(), ns);
 
         // store in cache for future usage
-        println!("found nameservers for {} {}", zone, ns);
         self.name_server_cache.lock().insert(zone, ns.clone());
-        Ok(ns)
+        Ok((ns, (last.trim_end_matches(".").into(), iustin)))
     }
 }
 
