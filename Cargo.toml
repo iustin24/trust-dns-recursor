@@ -87,8 +87,8 @@ time = "0.3"
 tracing = "0.1.30"
 tokio = { version = "1.0", features = ["net"] }
 toml = "0.5"
-trust-dns-proto = { version = "0.22.0", path = "../proto" }
-trust-dns-resolver = { version = "0.22.0", path = "../resolver" }
+trust-dns-proto = { version = "0.22.0" }
+trust-dns-resolver = { version = "0.22.0" }
 
 [dev-dependencies]
 tokio = { version="1.0", features = ["macros", "rt"] }
