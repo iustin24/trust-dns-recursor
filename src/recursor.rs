@@ -453,7 +453,8 @@ fn recursor_opts() -> ResolverOpts {
     options.validate = false; // we'll need to do any dnssec validation differently in a recursor (top-down rather than bottom-up)
     options.preserve_intermediates = true;
     options.recursion_desired = false;
+    options.timeout = std::time::Duration::from_secs(1);
+    options.attempts = 0;
     options.num_concurrent_reqs = 1;
-
     options
 }
